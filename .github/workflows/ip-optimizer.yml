@@ -20,7 +20,9 @@ jobs:
       CLOUDFLARE_IPS_URL: "www.cloudflare.com/ips-v4"
       CLOUDFLARE_IPS_URL_V4: "https://www.cloudflare.com/ips-v4"
       CLOUDFLARE_IPS_URL_V6: "https://www.cloudflare.com/ips-v6"
-      CUSTOM_IPS_FILE: "custom_ips.txt" # 自定义IP池文件
+      CUSTOM_IPS_FILE: "custom_ips.txt"
+      ENABLE_IPV4_POOL: 1   # 1=启用IPv4大池 0=禁用
+      ENABLE_IPV6_POOL: 0   # 1=启用IPv6大池 0=禁用
 
     steps:
     - uses: actions/checkout@v4
