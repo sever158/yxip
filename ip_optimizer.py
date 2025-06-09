@@ -15,115 +15,165 @@ import ipaddress
 #                 可配置参数（程序开头）              #
 ####################################################
 CONFIG = {
-    "MODE": "TCP",                  # 测试模式：PING/TCP
-    "PING_TARGET": "https://www.google.com/generate_204",  # Ping测试目标
-    "PING_COUNT": 3,                # Ping次数
-    "PING_TIMEOUT": 5,              # Ping超时(秒)
-    "PORT": 443,                    # TCP测试端口
-    "RTT_RANGE": "10~2000",         # 延迟范围(ms)
-    "LOSS_MAX": 30.0,               # 最大丢包率(%)
-    "THREADS": 50,                  # 并发线程数
-    "IP_POOL_SIZE": 100000,         # IP池总大小
-    "TEST_IP_COUNT": 1000,          # 实际测试IP数量
-    "TOP_IPS_LIMIT": 15,            # 精选IP数量
+    # 测试模式：PING 或 TCP
+    "MODE": "TCP",
+    # Ping 测试目标地址
+    "PING_TARGET": "https://www.google.com/generate_204",
+    # Ping 测试次数
+    "PING_COUNT": 3,
+    # Ping 超时时间（秒）
+    "PING_TIMEOUT": 3,
+    # TCP 测试端口
+    "PORT": 443,
+    # 延迟筛选范围（毫秒）
+    "RTT_RANGE": "10~2000",
+    # 最大丢包率（百分比）
+    "LOSS_MAX": 30.0,
+    # 并发线程数
+    "THREADS": 50,
+    # 随机IP池总大小
+    "IP_POOL_SIZE": 100000,
+    # 实际测试的IP数量
+    "TEST_IP_COUNT": 1000,
+    # 精选IP数量
+    "TOP_IPS_LIMIT": 15,
+    # Cloudflare IPv4池采集地址
     "CLOUDFLARE_IPS_URL": "https://www.cloudflare.com/ips-v4",
-    "CUSTOM_IPS_FILE": "CloudflareV4V6ip.txt",   # 本地IP池文件
-    "TCP_RETRY": 2,                 # TCP重试次数
-    "SPEED_TIMEOUT": 5,             # 测速超时时间
-    "SPEED_URL": "https://speed.cloudflare.com/__down?bytes=10000000"  # 测速URL
+    # Cloudflare IPv4池采集地址（可单独配置）
+    "CLOUDFLARE_IPS_URL_V4": "https://www.cloudflare.com/ips-v4",
+    # Cloudflare IPv6池采集地址（可单独配置）
+    "CLOUDFLARE_IPS_URL_V6": "https://www.cloudflare.com/ips-v6",
+    # 自定义IP池文件路径
+    "CUSTOM_IPS_FILE": "custom_ips.txt",
+    # TCP重试次数
+    "TCP_RETRY": 2,
+    # 测速超时时间
+    "SPEED_TIMEOUT": 3,
+    # 测速URL
+    "SPEED_URL": "https://speed.cloudflare.com/__down?bytes=10000000"
 }
-
-####################################################
-#                    路径适配                       #
-####################################################
-# 获取脚本所在目录，保证无论在哪运行都能正确创建 results 目录
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(BASE_DIR, 'results')
-os.makedirs(RESULTS_DIR, exist_ok=True)
 
 ####################################################
 #                    核心功能函数                   #
 ####################################################
 def init_env():
-    """初始化环境变量和全局配置"""
+    """
+    初始化环境变量，自动补全协议头，禁用TLS警告。
+    """
     for key, value in CONFIG.items():
         os.environ.setdefault(key, str(value))
-    cf_url = os.getenv('CLOUDFLARE_IPS_URL')
-    if cf_url and not cf_url.startswith(('http://', 'https://')):
-        os.environ['CLOUDFLARE_IPS_URL'] = f"https://{cf_url}"
+    # 自动添加协议头
+    for k in ["CLOUDFLARE_IPS_URL", "CLOUDFLARE_IPS_URL_V4", "CLOUDFLARE_IPS_URL_V6"]:
+        url = os.getenv(k)
+        if url and not url.startswith(('http://', 'https://')):
+            os.environ[k] = f"https://{url}"
     urllib3.disable_warnings()
 
 def fetch_ip_ranges():
     """
-    获取IP段列表，优先本地文件（CUSTOM_IPS_FILE），否则远程下载（CLOUDFLARE_IPS_URL）
-    支持IPv4和IPv6
+    获取IP段列表，优先使用自定义文件，否则分别采集IPv4/IPv6池。
     """
     custom_file = os.getenv('CUSTOM_IPS_FILE')
-    custom_file_path = os.path.join(BASE_DIR, custom_file)
-    if custom_file and os.path.exists(custom_file_path):
-        print(f"🔧 使用本地IP池文件: {custom_file}")
+    if custom_file and os.path.exists(custom_file):
+        print(f"🔧 使用自定义IP池文件: {custom_file}")
         try:
-            with open(custom_file_path, 'r') as f:
-                return [line.strip() for line in f if line.strip()]
+            with open(custom_file, 'r') as f:
+                return [line.strip() for line in f.readlines() if line.strip()]
         except Exception as e:
-            print(f"🚨 读取本地IP池失败: {e}")
-    # 远程下载
-    url = os.getenv('CLOUDFLARE_IPS_URL')
+            print(f"🚨 读取自定义IP池失败: {e}")
+    # 支持分别采集IPv4/IPv6
+    v4_url = os.getenv('CLOUDFLARE_IPS_URL_V4')
+    v6_url = os.getenv('CLOUDFLARE_IPS_URL_V6')
+    subnets = []
     try:
-        print(f"🌐 正在远程下载IP池: {url}")
-        res = requests.get(url, timeout=10, verify=False)
-        return [line.strip() for line in res.text.splitlines() if line.strip()]
+        if v4_url:
+            res = requests.get(v4_url, timeout=10, verify=False)
+            subnets += [line for line in res.text.splitlines() if line and ':' not in line]
     except Exception as e:
-        print(f"🚨 获取远程IP池失败: {e}")
-        return []
+        print(f"🚨 获取Cloudflare IPv4 IP段失败: {e}")
+    try:
+        if v6_url:
+            res = requests.get(v6_url, timeout=10, verify=False)
+            subnets += [line for line in res.text.splitlines() if line and ':' in line]
+    except Exception as e:
+        print(f"🚨 获取Cloudflare IPv6 IP段失败: {e}")
+    # 兼容旧变量
+    if not subnets:
+        url = os.getenv('CLOUDFLARE_IPS_URL')
+        try:
+            res = requests.get(url, timeout=10, verify=False)
+            subnets = res.text.splitlines()
+        except Exception as e:
+            print(f"🚨 获取Cloudflare IP段失败: {e}")
+            return []
+    return subnets
 
 def generate_random_ip(subnet):
     """
-    根据CIDR生成子网内的随机合法IP（支持IPv4和IPv6，排除网络和广播地址）
+    根据CIDR生成子网内的随机合法IP（支持IPv4和IPv6）。
     """
     try:
         network = ipaddress.ip_network(subnet, strict=False)
-        if network.num_addresses <= 2:
-            return str(network.network_address)
-        first_ip = int(network.network_address) + 1
-        last_ip = int(network.broadcast_address) - 1
-        random_ip_int = random.randint(first_ip, last_ip)
-        if isinstance(network, ipaddress.IPv4Network):
+        if network.version == 4:
+            network_addr = int(network.network_address)
+            broadcast_addr = int(network.broadcast_address)
+            first_ip = network_addr + 1
+            last_ip = broadcast_addr - 1
+            if last_ip <= first_ip:
+                return str(network.network_address)
+            random_ip_int = random.randint(first_ip, last_ip)
             return str(ipaddress.IPv4Address(random_ip_int))
-        else:
+        else:  # IPv6
+            network_addr = int(network.network_address)
+            num_hosts = network.num_addresses
+            if num_hosts <= 2:
+                return str(network.network_address)
+            # IPv6不排除首尾
+            random_ip_int = network_addr + random.randint(1, num_hosts - 2)
             return str(ipaddress.IPv6Address(random_ip_int))
     except Exception as e:
-        print(f"生成随机IP错误: {e}")
-        return subnet.split('/')[0]
+        print(f"生成随机IP错误: {e}，使用简单方法生成")
+        base_ip = subnet.split('/')[0]
+        if ':' in base_ip:
+            # 简单IPv6
+            return base_ip
+        return ".".join(base_ip.split('.')[:3] + [str(random.randint(1, 254))])
 
 def custom_ping(ip):
     """
-    跨平台Ping测试，自动适配IPv4/IPv6
-    返回平均延迟(ms)和丢包率(%)
+    跨平台自定义Ping测试，返回平均延迟和丢包率。
     """
-    is_ipv6 = ':' in ip
     target = urlparse(os.getenv('PING_TARGET')).netloc or os.getenv('PING_TARGET')
     count = int(os.getenv('PING_COUNT'))
     timeout = int(os.getenv('PING_TIMEOUT'))
+    
     try:
+        # 跨平台ping命令
         if os.name == 'nt':  # Windows
-            cmd = f"ping {'-6' if is_ipv6 else ''} -n {count} -w {timeout*1000} {target}"
+            cmd = f"ping -n {count} -w {timeout*1000} {target}"
         else:  # Linux/Mac
-            ping_bin = "ping6" if is_ipv6 else "ping"
-            cmd = f"{ping_bin} -c {count} -W {timeout} {target}"
+            cmd = f"ping -c {count} -W {timeout} -I {ip} {target}"
+        
         result = subprocess.run(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
+            cmd, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
             stderr=subprocess.STDOUT,
             text=True,
             timeout=timeout + 2
         )
+        
+        # 解析ping结果
         output = result.stdout.lower()
+        
         if "100% packet loss" in output or "unreachable" in output:
-            return float('inf'), 100.0
+            return float('inf'), 100.0  # 完全丢包
+        
+        # 提取延迟和丢包率
         loss_line = next((l for l in result.stdout.split('\n') if "packet loss" in l.lower()), "")
         timing_lines = [l for l in result.stdout.split('\n') if "time=" in l.lower()]
+        
+        # 计算丢包率
         loss_percent = 100.0
         if loss_line:
             loss_parts = loss_line.split('%')
@@ -132,6 +182,8 @@ def custom_ping(ip):
                     loss_percent = float(loss_parts[0].split()[-1])
                 except:
                     pass
+        
+        # 计算平均延迟
         delays = []
         for line in timing_lines:
             if "time=" in line:
@@ -141,7 +193,9 @@ def custom_ping(ip):
                 except:
                     continue
         avg_delay = np.mean(delays) if delays else float('inf')
+        
         return avg_delay, loss_percent
+        
     except subprocess.TimeoutExpired:
         return float('inf'), 100.0
     except Exception as e:
@@ -150,43 +204,44 @@ def custom_ping(ip):
 
 def tcp_ping(ip, port, timeout=2):
     """
-    TCP连接测试，自动适配IPv4/IPv6，返回平均延迟(ms)和丢包率(%)
+    TCP连接测试，带重试机制，返回平均延迟和丢包率。
     """
     retry = int(os.getenv('TCP_RETRY', 3))
     success_count = 0
     total_rtt = 0
-    family = socket.AF_INET6 if ':' in ip else socket.AF_INET
+    
     for _ in range(retry):
         start = time.time()
         try:
-            with socket.socket(family, socket.SOCK_STREAM) as sock:
-                sock.settimeout(timeout)
-                sock.connect((ip, port))
-                rtt = (time.time() - start) * 1000
+            with socket.create_connection((ip, port), timeout=timeout) as sock:
+                rtt = (time.time() - start) * 1000  # 毫秒
                 total_rtt += rtt
                 success_count += 1
         except:
             pass
-        time.sleep(0.1)
+        time.sleep(0.1)  # 短暂间隔
+    
     loss_rate = 100 - (success_count / retry * 100)
     avg_rtt = total_rtt / success_count if success_count > 0 else float('inf')
     return avg_rtt, loss_rate
 
 def speed_test(ip):
     """
-    下载测速，自动适配IPv4/IPv6，返回Mbps
-    只用Host头，不替换URL里的域名，保证SNI和证书校验通过
+    对指定IP进行测速，返回Mbps。
     """
     url = os.getenv('SPEED_URL')
     timeout = float(os.getenv('SPEED_TIMEOUT', 10))
     try:
         parsed_url = urlparse(url)
         host = parsed_url.hostname
-        # 不替换url中的host，直接用域名测速
+        scheme = parsed_url.scheme
+        # 强制用目标IP直连
+        connect_url = url.replace(host, ip)
+        headers = {'Host': host}
         start_time = time.time()
         response = requests.get(
-            url,
-            headers={'Host': host},
+            connect_url,
+            headers=headers,
             timeout=timeout,
             verify=False,
             stream=True
@@ -197,23 +252,32 @@ def speed_test(ip):
             if time.time() - start_time > timeout:
                 break
         duration = time.time() - start_time
-        speed_mbps = (total_bytes * 8) / (duration * 1000000)
+        speed_mbps = (total_bytes * 8) / (duration * 1000000) if duration > 0 else 0
         return speed_mbps
     except Exception as e:
-        print(f"测速失败 [{ip}]: {e}")
+        # print(f"测速失败 [{ip}]: {e}")
         return 0.0
 
 def ping_test(ip):
+    """
+    IP综合测试 - 第一阶段：Ping或TCP延迟测试。
+    """
     mode = os.getenv('MODE', 'PING').upper()
+    
     if mode == "PING":
+        # 使用自定义Ping测试
         avg_delay, loss_rate = custom_ping(ip)
         return (ip, avg_delay, loss_rate)
-    else:
+    
+    else:  # TCP模式
         port = int(os.getenv('PORT', 443))
         avg_rtt, loss_rate = tcp_ping(ip, port, timeout=float(os.getenv('PING_TIMEOUT', 2)))
         return (ip, avg_rtt, loss_rate)
 
 def full_test(ip_data):
+    """
+    IP综合测试 - 第二阶段：测速。
+    """
     ip = ip_data[0]
     speed = speed_test(ip)
     return (*ip_data, speed)
@@ -222,10 +286,12 @@ def full_test(ip_data):
 #                      主逻辑                      #
 ####################################################
 if __name__ == "__main__":
+    # 初始化环境变量
     init_env()
     print("="*60)
-    print(f"{'IP网络优化器 v2.2':^60}")
+    print(f"{'IP网络优化器 v2.3 (IPv6大池支持)':^60}")
     print("="*60)
+    # 打印主要参数
     print(f"测试模式: {os.getenv('MODE')}")
     if os.getenv('MODE') == "PING":
         print(f"Ping目标: {os.getenv('PING_TARGET')}")
@@ -241,44 +307,57 @@ if __name__ == "__main__":
     print(f"测试IP数: {os.getenv('TEST_IP_COUNT')}")
     custom_file = os.getenv('CUSTOM_IPS_FILE')
     if custom_file:
-        print(f"本地IP池: {custom_file}")
-    print(f"Cloudflare IP源: {os.getenv('CLOUDFLARE_IPS_URL')}")
+        print(f"自定义IP池: {custom_file}")
+    else:
+        print(f"Cloudflare IP源: {os.getenv('CLOUDFLARE_IPS_URL_V4')} / {os.getenv('CLOUDFLARE_IPS_URL_V6')}")
     print(f"测速URL: {os.getenv('SPEED_URL')}")
     print("="*60 + "\n")
 
+    # 获取IP段
     subnets = fetch_ip_ranges()
     if not subnets:
         print("❌ 无法获取IP段，程序终止")
         exit(1)
-    source_type = "本地" if custom_file and os.path.exists(os.path.join(BASE_DIR, custom_file)) else "远程"
+    source_type = "自定义" if custom_file and os.path.exists(custom_file) else "Cloudflare"
     print(f"✅ 获取到 {len(subnets)} 个{source_type} IP段")
 
     ip_pool_size = int(os.getenv('IP_POOL_SIZE'))
     test_ip_count = int(os.getenv('TEST_IP_COUNT'))
 
+    # 多线程生成大池
     full_ip_pool = set()
-    print(f"🔧 正在生成 {ip_pool_size} 个随机IP的大池...")
-    with tqdm(total=ip_pool_size, desc="生成IP大池", unit="IP") as pbar:
-        while len(full_ip_pool) < ip_pool_size:
+    def ip_worker(_):
+        while True:
             subnet = random.choice(subnets)
             ip = generate_random_ip(subnet)
             if ip not in full_ip_pool:
-                full_ip_pool.add(ip)
-                pbar.update(1)
-    print(f"✅ 成功生成 {len(full_ip_pool)} 个随机IP的大池")
+                return ip
+    print(f"🔧 正在生成 {ip_pool_size} 个随机IP的大池（支持IPv6）...")
+    with ThreadPoolExecutor(max_workers=8) as pool, tqdm(total=ip_pool_size, desc="生成IP大池", unit="IP") as pbar:
+        futures = [pool.submit(ip_worker, i) for i in range(ip_pool_size)]
+        for f in as_completed(futures):
+            ip = f.result()
+            full_ip_pool.add(ip)
+            pbar.update(1)
+            if len(full_ip_pool) >= ip_pool_size:
+                break
 
+    print(f"✅ 成功生成 {len(full_ip_pool)} 个随机IP的大池")
     if test_ip_count > len(full_ip_pool):
         print(f"⚠️ 警告: 测试IP数量({test_ip_count})大于IP池大小({len(full_ip_pool)})，使用全部IP")
         test_ip_count = len(full_ip_pool)
     test_ip_pool = random.sample(list(full_ip_pool), test_ip_count)
     print(f"🔧 从大池中随机选择 {len(test_ip_pool)} 个IP进行测试")
 
+    # 3. 第一阶段：Ping测试（筛选IP）
     ping_results = []
     with ThreadPoolExecutor(max_workers=int(os.getenv('THREADS'))) as executor:
         future_to_ip = {executor.submit(ping_test, ip): ip for ip in test_ip_pool}
+        
+        # 进度条配置
         with tqdm(
-            total=len(test_ip_pool),
-            desc="🚀 Ping测试进度",
+            total=len(test_ip_pool), 
+            desc="🚀 Ping测试进度", 
             unit="IP",
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ) as pbar:
@@ -289,26 +368,32 @@ if __name__ == "__main__":
                     print(f"\n🔧 Ping测试异常: {e}")
                 finally:
                     pbar.update(1)
-
+    
+    # 筛选通过Ping测试的IP
     rtt_min, rtt_max = map(int, os.getenv('RTT_RANGE').split('~'))
     loss_max = float(os.getenv('LOSS_MAX'))
+    
     passed_ips = [
-        ip_data for ip_data in ping_results
+        ip_data for ip_data in ping_results 
         if rtt_min <= ip_data[1] <= rtt_max
         and ip_data[2] <= loss_max
     ]
+    
     print(f"\n✅ Ping测试完成: 总数 {len(ping_results)}, 通过 {len(passed_ips)}")
-
+    
+    # 4. 第二阶段：测速（仅对通过Ping测试的IP）
     if not passed_ips:
         print("❌ 没有通过Ping测试的IP，程序终止")
         exit(1)
-
+    
     full_results = []
     with ThreadPoolExecutor(max_workers=int(os.getenv('THREADS'))) as executor:
         future_to_ip = {executor.submit(full_test, ip_data): ip_data for ip_data in passed_ips}
+        
+        # 进度条配置
         with tqdm(
-            total=len(passed_ips),
-            desc="📊 测速进度",
+            total=len(passed_ips), 
+            desc="📊 测速进度", 
             unit="IP",
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ) as pbar:
@@ -319,27 +404,45 @@ if __name__ == "__main__":
                     print(f"\n🔧 测速异常: {e}")
                 finally:
                     pbar.update(1)
-
+    
+    # 5. 精选IP排序（按速度降序，延迟升序）
     sorted_ips = sorted(
         full_results,
-        key=lambda x: (-x[3], x[1])
+        key=lambda x: (-x[3], x[1])  # 先按速度降序，再按延迟升序
     )[:int(os.getenv('TOP_IPS_LIMIT', 15))]
-
-    # 6. 保存结果（全部用绝对路径，保证目录一定存在）
-    with open(os.path.join(RESULTS_DIR, 'all_ips.txt'), 'w') as f:
+    
+    # 6. 保存结果
+    results_dir = os.path.join(os.path.dirname(__file__), 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    with open(os.path.join(results_dir, 'all_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in ping_results]))
-    with open(os.path.join(RESULTS_DIR, 'passed_ips.txt'), 'w') as f:
+    with open(os.path.join(results_dir, 'passed_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in passed_ips]))
-    with open(os.path.join(RESULTS_DIR, 'full_results.csv'), 'w') as f:
+    with open(os.path.join(results_dir, 'full_results.csv'), 'w') as f:
         f.write("IP,延迟(ms),丢包率(%),速度(Mbps)\n")
         for ip_data in full_results:
             f.write(f"{ip_data[0]},{ip_data[1]:.2f},{ip_data[2]:.2f},{ip_data[3]:.2f}\n")
-    with open(os.path.join(RESULTS_DIR, 'top_ips.txt'), 'w') as f:
+    with open(os.path.join(results_dir, 'top_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in sorted_ips]))
-    with open(os.path.join(RESULTS_DIR, 'top_ips_details.csv'), 'w') as f:
+    with open(os.path.join(results_dir, 'top_ips_details.csv'), 'w') as f:
         f.write("IP,延迟(ms),丢包率(%),速度(Mbps)\n")
         for ip_data in sorted_ips:
             f.write(f"{ip_data[0]},{ip_data[1]:.2f},{ip_data[2]:.2f},{ip_data[3]:.2f}\n")
 
+    # 7. 显示统计结果
+    print("\n" + "="*60)
+    print(f"{'🔥 测试结果统计':^60}")
+    print("="*60)
+    print(f"IP池大小: {ip_pool_size}")
+    print(f"实际测试IP数: {len(ping_results)}")
+    print(f"通过Ping测试IP数: {len(passed_ips)}")
+    print(f"测速IP数: {len(full_results)}")
+    print(f"精选TOP IP: {len(sorted_ips)}")
+    
+    if sorted_ips:
+        print("\n🏆【最佳IP TOP5】")
+        for i, ip_data in enumerate(sorted_ips[:5]):
+            print(f"{i+1}. {ip_data[0]} | 延迟:{ip_data[1]:.2f}ms | 丢包:{ip_data[2]:.2f}% | 速度:{ip_data[3]:.2f}Mbps")
+    
     print("="*60)
     print("✅ 结果已保存至 results/ 目录")
