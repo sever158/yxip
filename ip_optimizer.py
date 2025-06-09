@@ -129,33 +129,45 @@ def filter_subnets_by_switch(subnets):
 def generate_random_ip(subnet):
     """
     根据CIDR生成子网内的随机合法IP（支持IPv4和IPv6）。
+    修正：IPv4每段最大不能超过255。
     """
     try:
         network = ipaddress.ip_network(subnet, strict=False)
         if network.version == 4:
+            # 只允许生成合法的IPv4地址（每段0-255）
             network_addr = int(network.network_address)
             broadcast_addr = int(network.broadcast_address)
             first_ip = network_addr + 1
             last_ip = broadcast_addr - 1
-            if last_ip <= first_ip:
-                return str(network.network_address)
-            random_ip_int = random.randint(first_ip, last_ip)
-            return str(ipaddress.IPv4Address(random_ip_int))
+            # 限制最大为255
+            def valid_ipv4(ip_int):
+                octets = [(ip_int >> 24) & 0xFF, (ip_int >> 16) & 0xFF, (ip_int >> 8) & 0xFF, ip_int & 0xFF]
+                return all(0 <= o <= 255 for o in octets)
+            # 生成合法IP
+            for _ in range(10):  # 最多尝试10次
+                random_ip_int = random.randint(first_ip, last_ip)
+                if valid_ipv4(random_ip_int):
+                    return str(ipaddress.IPv4Address(random_ip_int))
+            # 如果10次都不行，直接返回网络地址
+            return str(network.network_address)
         else:  # IPv6
             network_addr = int(network.network_address)
             num_hosts = network.num_addresses
             if num_hosts <= 2:
                 return str(network.network_address)
-            # IPv6不排除首尾
             random_ip_int = network_addr + random.randint(1, num_hosts - 2)
             return str(ipaddress.IPv6Address(random_ip_int))
     except Exception as e:
         print(f"生成随机IP错误: {e}，使用简单方法生成")
         base_ip = subnet.split('/')[0]
         if ':' in base_ip:
-            # 简单IPv6
             return base_ip
-        return ".".join(base_ip.split('.')[:3] + [str(random.randint(1, 254))])
+        # IPv4兜底也保证每段不大于255
+        parts = base_ip.split('.')
+        while len(parts) < 4:
+            parts.append(str(random.randint(0, 255)))
+        parts = [str(min(int(x), 255)) for x in parts[:3]] + [str(random.randint(1, 254))]
+        return ".".join(parts)
 
 def custom_ping(ip):
     """
