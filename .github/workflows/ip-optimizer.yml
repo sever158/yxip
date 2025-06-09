@@ -2,11 +2,15 @@ name: IP Optimizer
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '30 21 * * *'  # 北京时间早上5:30
+    - cron: '30 9 * * *'   # 北京时间下午5:30
   push:
     paths:
-      - '**.py'
-      - '**.txt'
+      - 'main/**'
       - '.github/workflows/ip-optimizer.yml'
+
+# ...后续内容保持不变...
 
 jobs:
   optimize:
@@ -41,13 +45,13 @@ jobs:
           MODE: TCP
           PING_TARGET: https://www.google.com/generate_204
           PING_COUNT: 3
-          PING_TIMEOUT: 5
+          PING_TIMEOUT: 3
           PORT: 443
           RTT_RANGE: 10~2000
           LOSS_MAX: 30
           THREADS: 50
-          IP_POOL_SIZE: 10000
-          TEST_IP_COUNT: 500
+          IP_POOL_SIZE: 50000
+          TEST_IP_COUNT: 800
           TOP_IPS_LIMIT: 10
           SPEED_TIMEOUT: 5
           SPEED_URL: https://speed.cloudflare.com/__down?bytes=10000000
