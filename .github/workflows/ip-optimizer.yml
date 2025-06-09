@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'yxip-main/**'
+      - 'main/**'
       - '.github/workflows/ip-optimizer.yml'
 
 jobs:
@@ -26,19 +26,16 @@ jobs:
           pip install requests tqdm numpy
 
       - name: 运行 IP 优选脚本
-        working-directory: ./yxip-main
+        working-directory: yxip-main
         env:
-          # 可自定义参数，优先本地 CloudflareV4V6ip.txt
           CUSTOM_IPS_FILE: CloudflareV4V6ip.txt
-          # 如需远程下载IP池，注释上面一行，取消下面一行注释
-          # CLOUDFLARE_IPS_URL: https://www.cloudflare.com/ips-v6
           MODE: TCP
           PING_TARGET: https://www.google.com/generate_204
           PING_COUNT: 3
           PING_TIMEOUT: 5
           PORT: 443
           RTT_RANGE: 10~2000
-          LOSS_MAX: 30.0
+          LOSS_MAX: 30
           THREADS: 50
           IP_POOL_SIZE: 10000
           TEST_IP_COUNT: 500
