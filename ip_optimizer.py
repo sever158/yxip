@@ -18,13 +18,13 @@ CONFIG = {
     "MODE": "TCP",                  # 测试模式：PING/TCP
     "PING_TARGET": "https://www.google.com/generate_204",  # Ping测试目标
     "PING_COUNT": 3,                # Ping次数
-    "PING_TIMEOUT": 3,              # Ping超时(秒)
+    "PING_TIMEOUT": 5,              # Ping超时(秒)
     "PORT": 443,                    # TCP测试端口
     "RTT_RANGE": "10~2000",         # 延迟范围(ms)
     "LOSS_MAX": 30.0,               # 最大丢包率(%)
     "THREADS": 50,                  # 并发线程数
     "IP_POOL_SIZE": 100000,         # IP池总大小
-    "TEST_IP_COUNT": 800,          # 实际测试IP数量
+    "TEST_IP_COUNT": 1000,          # 实际测试IP数量
     "TOP_IPS_LIMIT": 15,            # 精选IP数量
     "CLOUDFLARE_IPS_URL": "https://www.cloudflare.com/ips-v4",
     "CUSTOM_IPS_FILE": "CloudflareV4V6ip.txt",   # 本地IP池文件
@@ -32,6 +32,14 @@ CONFIG = {
     "SPEED_TIMEOUT": 5,             # 测速超时时间
     "SPEED_URL": "https://speed.cloudflare.com/__down?bytes=10000000"  # 测速URL
 }
+
+####################################################
+#                    路径适配                       #
+####################################################
+# 获取脚本所在目录，保证无论在哪运行都能正确创建 results 目录
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(BASE_DIR, 'results')
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 ####################################################
 #                    核心功能函数                   #
@@ -51,10 +59,11 @@ def fetch_ip_ranges():
     支持IPv4和IPv6
     """
     custom_file = os.getenv('CUSTOM_IPS_FILE')
-    if custom_file and os.path.exists(custom_file):
+    custom_file_path = os.path.join(BASE_DIR, custom_file)
+    if custom_file and os.path.exists(custom_file_path):
         print(f"🔧 使用本地IP池文件: {custom_file}")
         try:
-            with open(custom_file, 'r') as f:
+            with open(custom_file_path, 'r') as f:
                 return [line.strip() for line in f if line.strip()]
         except Exception as e:
             print(f"🚨 读取本地IP池失败: {e}")
@@ -241,7 +250,7 @@ if __name__ == "__main__":
     if not subnets:
         print("❌ 无法获取IP段，程序终止")
         exit(1)
-    source_type = "本地" if custom_file and os.path.exists(custom_file) else "远程"
+    source_type = "本地" if custom_file and os.path.exists(os.path.join(BASE_DIR, custom_file)) else "远程"
     print(f"✅ 获取到 {len(subnets)} 个{source_type} IP段")
 
     ip_pool_size = int(os.getenv('IP_POOL_SIZE'))
@@ -316,33 +325,21 @@ if __name__ == "__main__":
         key=lambda x: (-x[3], x[1])
     )[:int(os.getenv('TOP_IPS_LIMIT', 15))]
 
-    os.makedirs('results', exist_ok=True)
-    with open('results/all_ips.txt', 'w') as f:
+    # 6. 保存结果（全部用绝对路径，保证目录一定存在）
+    with open(os.path.join(RESULTS_DIR, 'all_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in ping_results]))
-    with open('results/passed_ips.txt', 'w') as f:
+    with open(os.path.join(RESULTS_DIR, 'passed_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in passed_ips]))
-    with open('results/full_results.csv', 'w') as f:
+    with open(os.path.join(RESULTS_DIR, 'full_results.csv'), 'w') as f:
         f.write("IP,延迟(ms),丢包率(%),速度(Mbps)\n")
         for ip_data in full_results:
             f.write(f"{ip_data[0]},{ip_data[1]:.2f},{ip_data[2]:.2f},{ip_data[3]:.2f}\n")
-    with open('results/top_ips.txt', 'w') as f:
+    with open(os.path.join(RESULTS_DIR, 'top_ips.txt'), 'w') as f:
         f.write("\n".join([ip[0] for ip in sorted_ips]))
-    with open('results/top_ips_details.csv', 'w') as f:
+    with open(os.path.join(RESULTS_DIR, 'top_ips_details.csv'), 'w') as f:
         f.write("IP,延迟(ms),丢包率(%),速度(Mbps)\n")
         for ip_data in sorted_ips:
             f.write(f"{ip_data[0]},{ip_data[1]:.2f},{ip_data[2]:.2f},{ip_data[3]:.2f}\n")
 
-    print("\n" + "="*60)
-    print(f"{'🔥 测试结果统计':^60}")
-    print("="*60)
-    print(f"IP池大小: {ip_pool_size}")
-    print(f"实际测试IP数: {len(ping_results)}")
-    print(f"通过Ping测试IP数: {len(passed_ips)}")
-    print(f"测速IP数: {len(full_results)}")
-    print(f"精选TOP IP: {len(sorted_ips)}")
-    if sorted_ips:
-        print("\n🏆【最佳IP TOP5】")
-        for i, ip_data in enumerate(sorted_ips[:5]):
-            print(f"{i+1}. {ip_data[0]} | 延迟:{ip_data[1]:.2f}ms | 丢包:{ip_data[2]:.2f}% | 速度:{ip_data[3]:.2f}Mbps")
     print("="*60)
     print("✅ 结果已保存至 results/ 目录")
