@@ -26,7 +26,7 @@ jobs:
           pip install requests tqdm numpy
 
       - name: 运行 IP 优选脚本
-        working-directory: yxip-main
+        working-directory: main
         env:
           CUSTOM_IPS_FILE: CloudflareV4V6ip.txt
           MODE: TCP
@@ -49,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: 优选IP结果
-          path: yxip-main/results/
+          path: main/results/
