@@ -1,63 +1,48 @@
 name: IP Optimizer
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 21 * * *'  # 北京时间早上5:30
-    - cron: '30 9 * * *'   # 北京时间下午5:30
-  push:
-    paths:
-      - 'main/**'
-      - '.github/workflows/ip-optimizer.yml'
-
-# ...后续内容保持不变...
+    - cron: '0 21 * * *'  # UTC 21:00 = 北京时间5:00
+    - cron: '0 9 * * *'   # UTC 9:00 = 北京时间17:00
 
 jobs:
   optimize:
     runs-on: ubuntu-latest
+    env:
+      MODE: TCP
+      PORT: 443
+      RTT_RANGE: "10~2000"
+      LOSS_MAX: 30
+      THREADS: 50
+      IP_POOL_SIZE: 100000
+      TEST_IP_COUNT: 1000
+      SPEED_URL: "https://speed.cloudflare.com/__down?bytes=10000000"
+      CLOUDFLARE_IPS_URL: "www.cloudflare.com/ips-v4"
+      CLOUDFLARE_IPS_URL_V4: "https://www.cloudflare.com/ips-v4"
+      CLOUDFLARE_IPS_URL_V6: "https://www.cloudflare.com/ips-v6"
+      CUSTOM_IPS_FILE: "custom_ips.txt" # 自定义IP池文件
 
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: 查找主目录
-        id: finddir
-        run: |
-          # 自动查找包含 ip_optimizer.py 的目录
-          DIR=$(find . -type f -name "ip_optimizer.py" | head -n1 | xargs dirname)
-          echo "PYDIR=$DIR" >> $GITHUB_ENV
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: 设置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    - name: Install dependencies
+      run: |
+        pip install requests numpy tqdm
+        sudo apt-get update
+        sudo apt-get install -y net-tools
 
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests tqdm numpy
+    - name: Run IP Optimizer
+      run: python ip_optimizer.py
 
-      - name: 运行 IP 优选脚本
-        run: python ip_optimizer.py
-        working-directory: ${{ env.PYDIR }}
-        env:
-          CUSTOM_IPS_FILE: CloudflareV4V6ip.txt
-          MODE: TCP
-          PING_TARGET: https://www.google.com/generate_204
-          PING_COUNT: 3
-          PING_TIMEOUT: 3
-          PORT: 443
-          RTT_RANGE: 10~2000
-          LOSS_MAX: 30
-          THREADS: 50
-          IP_POOL_SIZE: 100000
-          TEST_IP_COUNT: 1000
-          TOP_IPS_LIMIT: 15
-          SPEED_TIMEOUT: 5
-          SPEED_URL: https://speed.cloudflare.com/__down?bytes=10000000
-
-      - name: 上传结果到工作流产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: 优选IP结果
-          path: ${{ env.PYDIR }}/results/
+    - name: Commit results
+      run: |
+        git config user.name "github-actions"
+        git config user.email "actions@github.com"
+        git add results/
+        git commit -m "Auto: Update optimized IPs"
+        git push
