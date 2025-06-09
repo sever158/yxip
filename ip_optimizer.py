@@ -228,7 +228,7 @@ def tcp_ping(ip, port, timeout=2):
 def speed_test(ip):
     """
     对指定IP进行测速，返回Mbps。
-    修复直连IP测速为0的问题，兼容IPv4/IPv6。
+    兼容GitHub Actions环境，修复Cloudflare测速站点直连IP速度为0的问题。
     """
     url = os.getenv('SPEED_URL')
     timeout = float(os.getenv('SPEED_TIMEOUT', 10))
@@ -242,24 +242,71 @@ def speed_test(ip):
         else:
             ip_url = url.replace(host, ip)
         headers = {'Host': host}
-        start_time = time.time()
-        response = requests.get(
-            ip_url,
-            headers=headers,
-            timeout=timeout,
-            verify=False,
-            stream=True
-        )
-        total_bytes = 0
-        for chunk in response.iter_content(chunk_size=8192):
-            total_bytes += len(chunk)
-            if time.time() - start_time > timeout:
-                break
-        duration = time.time() - start_time
-        speed_mbps = (total_bytes * 8) / (duration * 1000000) if duration > 0 else 0
-        return speed_mbps
+        # 使用requests的自定义适配器强制绑定IP
+        session = requests.Session()
+        from requests.adapters import HTTPAdapter
+        import urllib3.util.connection
+        import socket as pysocket
+
+        def _patched_create_connection(address, *args, **kwargs):
+            host_, port = address
+            # 强制用目标IP直连
+            if host_ == ip or host_ == f'[{ip}]':
+                host_ = ip
+            family = pysocket.AF_INET6 if ':' in ip else pysocket.AF_INET
+            return pysocket.create_connection((host_, port), *args, **kwargs, family=family)
+        old_create_connection = urllib3.util.connection.create_connection
+        urllib3.util.connection.create_connection = _patched_create_connection
+
+        try:
+            start_time = time.time()
+            response = session.get(
+                ip_url,
+                headers=headers,
+                timeout=timeout,
+                verify=False,
+                stream=True
+            )
+            total_bytes = 0
+            for chunk in response.iter_content(chunk_size=8192):
+                total_bytes += len(chunk)
+                if time.time() - start_time > timeout:
+                    break
+            duration = time.time() - start_time
+            speed_mbps = (total_bytes * 8) / (duration * 1000000) if duration > 0 else 0
+            return speed_mbps
+        finally:
+            urllib3.util.connection.create_connection = old_create_connection
     except Exception as e:
-        # print(f"测速失败 [{ip}]: {e}")
+        # 降级为HTTP测速（部分测速站点支持），便于排查HTTPS证书/SNI问题
+        if url.startswith("https://"):
+            try:
+                url_http = url.replace("https://", "http://", 1)
+                parsed_url = urlparse(url_http)
+                host = parsed_url.hostname
+                if ':' in ip and not ip.startswith('['):
+                    ip_url = url_http.replace(host, f'[{ip}]')
+                else:
+                    ip_url = url_http.replace(host, ip)
+                headers = {'Host': host}
+                start_time = time.time()
+                response = requests.get(
+                    ip_url,
+                    headers=headers,
+                    timeout=timeout,
+                    verify=False,
+                    stream=True
+                )
+                total_bytes = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    total_bytes += len(chunk)
+                    if time.time() - start_time > timeout:
+                        break
+                duration = time.time() - start_time
+                speed_mbps = (total_bytes * 8) / (duration * 1000000) if duration > 0 else 0
+                return speed_mbps
+            except Exception:
+                return 0.0
         return 0.0
 
 def ping_test(ip):
