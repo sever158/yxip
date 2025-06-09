@@ -4,7 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'main/**'
+      - '**.py'
+      - '**.txt'
       - '.github/workflows/ip-optimizer.yml'
 
 jobs:
@@ -14,6 +15,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 查找主目录
+        id: finddir
+        run: |
+          # 自动查找包含 ip_optimizer.py 的目录
+          DIR=$(find . -type f -name "ip_optimizer.py" | head -n1 | xargs dirname)
+          echo "PYDIR=$DIR" >> $GITHUB_ENV
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
@@ -26,7 +34,8 @@ jobs:
           pip install requests tqdm numpy
 
       - name: 运行 IP 优选脚本
-        working-directory: main
+        run: python ip_optimizer.py
+        working-directory: ${{ env.PYDIR }}
         env:
           CUSTOM_IPS_FILE: CloudflareV4V6ip.txt
           MODE: TCP
@@ -42,10 +51,9 @@ jobs:
           TOP_IPS_LIMIT: 10
           SPEED_TIMEOUT: 5
           SPEED_URL: https://speed.cloudflare.com/__down?bytes=10000000
-        run: python ip_optimizer.py
 
       - name: 上传结果到工作流产物
         uses: actions/upload-artifact@v4
         with:
           name: 优选IP结果
-          path: main/results/
+          path: ${{ env.PYDIR }}/results/
