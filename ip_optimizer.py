@@ -50,7 +50,11 @@ CONFIG = {
     # 测速超时时间
     "SPEED_TIMEOUT": 3,
     # 测速URL
-    "SPEED_URL": "https://speed.cloudflare.com/__down?bytes=10000000"
+    "SPEED_URL": "https://speed.cloudflare.com/__down?bytes=10000000",
+    # 是否启用IPv4大池 1=开 0=关
+    "ENABLE_IPV4_POOL": 1,
+    # 是否启用IPv6大池 1=开 0=关
+    "ENABLE_IPV6_POOL": 0
 }
 
 ####################################################
@@ -107,6 +111,20 @@ def fetch_ip_ranges():
             print(f"🚨 获取Cloudflare IP段失败: {e}")
             return []
     return subnets
+
+# 新增：根据开关筛选子网类型
+def filter_subnets_by_switch(subnets):
+    enable_ipv4 = int(os.getenv('ENABLE_IPV4_POOL', '1'))
+    enable_ipv6 = int(os.getenv('ENABLE_IPV6_POOL', '1'))
+    filtered = []
+    for subnet in subnets:
+        if ':' in subnet:
+            if enable_ipv6:
+                filtered.append(subnet)
+        else:
+            if enable_ipv4:
+                filtered.append(subnet)
+    return filtered
 
 def generate_random_ip(subnet):
     """
@@ -369,8 +387,13 @@ if __name__ == "__main__":
     if not subnets:
         print("❌ 无法获取IP段，程序终止")
         exit(1)
+    # 新增：根据开关筛选
+    subnets = filter_subnets_by_switch(subnets)
+    if not subnets:
+        print("❌ 没有可用的IP段（请检查ENABLE_IPV4_POOL/ENABLE_IPV6_POOL配置）")
+        exit(1)
     source_type = "自定义" if custom_file and os.path.exists(custom_file) else "Cloudflare"
-    print(f"✅ 获取到 {len(subnets)} 个{source_type} IP段")
+    print(f"✅ 获取到 {len(subnets)} 个{source_type} IP段（已按开关筛选）")
 
     ip_pool_size = int(os.getenv('IP_POOL_SIZE'))
     test_ip_count = int(os.getenv('TEST_IP_COUNT'))
