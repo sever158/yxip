@@ -228,6 +228,7 @@ def tcp_ping(ip, port, timeout=2):
 def speed_test(ip):
     """
     对指定IP进行测速，返回Mbps。
+    修复直连IP测速为0的问题，兼容IPv4/IPv6。
     """
     url = os.getenv('SPEED_URL')
     timeout = float(os.getenv('SPEED_TIMEOUT', 10))
@@ -235,12 +236,15 @@ def speed_test(ip):
         parsed_url = urlparse(url)
         host = parsed_url.hostname
         scheme = parsed_url.scheme
-        # 强制用目标IP直连
-        connect_url = url.replace(host, ip)
+        # IPv6地址需加[]
+        if ':' in ip and not ip.startswith('['):
+            ip_url = url.replace(host, f'[{ip}]')
+        else:
+            ip_url = url.replace(host, ip)
         headers = {'Host': host}
         start_time = time.time()
         response = requests.get(
-            connect_url,
+            ip_url,
             headers=headers,
             timeout=timeout,
             verify=False,
